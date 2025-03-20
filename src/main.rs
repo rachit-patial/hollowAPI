@@ -4,8 +4,10 @@ use axum::{
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde_json::{json, Value};
-use std::net::SocketAddr;
-use tokio::net::TcpListener;
+use std::{fs::File, io::{Read, Write}, net::SocketAddr};
+use tokio::{fs, net::TcpListener};
+
+const CACHE_EXPIRY_HOURS: i64 = 1;
 
 #[tokio::main]
 async fn main() {
@@ -28,11 +30,42 @@ async fn main() {
 
 // API Handler
 async fn get_last_modified(Path(package_name): Path<String>) -> Result<Json<Value>, StatusCode> {
+
+    let cache_dir = "cache";
+    let cache_file = format!("{}/{}.json", cache_dir, package_name);
+
+    fs::create_dir(cache_dir)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
+
+    if let Ok(metadata) = tokio::fs::metadata(&cache_file).await {
+        if let Ok(modified) = metadata.modified() {
+            let modified_time: DateTime<Utc> = modified.into();
+            let now = Utc::now();
+            let age_hours = (now - modified_time).num_hours();
+
+            if age_hours < CACHE_EXPIRY_HOURS {
+                if let Ok(mut file) = File::open(&cache_file) {
+                    let mut contents = String::new();   
+                    file.read_to_string(&mut contents).unwrap(); 
+                    if let Ok(cached_json) = serde_json::from_str::<Value>(&contents) {
+                    println!("Using cached date for {}", package_name);
+                    return Ok(Json(cached_json));
+                    
+                    }
+                    
+                }
+            } else {
+                println!("Cache expired for {}, fetching new data....", package_name);
+            }
+        }
+    }
+
     let owner = "void-linux";
     let repo = "void-packages";
     println!("Received package_name: {}", package_name);
     let path = format!("srcpkgs/{}/template", package_name); // File path inside the repo
-    println!("Path: {}", path);
+    //println!("Path: {}", path);
     let url = format!(
         "https://api.github.com/repos/{}/{}/commits?path={}",
         owner, repo, path
@@ -61,6 +94,19 @@ async fn get_last_modified(Path(package_name): Path<String>) -> Result<Json<Valu
 
         let duration_since_last_modified = now - date;
         let weeks_since_last_modified = duration_since_last_modified.num_days();
+
+        let cached_data = json!({
+            "package_name": path,
+            "last_modified": date_str,
+            "days_since_last_modifed": weeks_since_last_modified
+        });
+
+        let mut file = File::create(&cache_file).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        file.write_all(cached_data.to_string().as_bytes())
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;     
+
+        println!("Cached data for {}", package_name);
 
         Ok(Json(json!({ 
             "package_name": path,

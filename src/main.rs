@@ -64,8 +64,7 @@ async fn get_last_modified(Path(package_name): Path<String>) -> Result<Json<Valu
     let owner = "void-linux";
     let repo = "void-packages";
     println!("Received package_name: {}", package_name);
-    let path = format!("srcpkgs/{}/template", package_name); // File path inside the repo
-    //println!("Path: {}", path);
+    let path = format!("srcpkgs/{}/template", package_name);
     let url = format!(
         "https://api.github.com/repos/{}/{}/commits?path={}",
         owner, repo, path
@@ -74,7 +73,7 @@ async fn get_last_modified(Path(package_name): Path<String>) -> Result<Json<Valu
     let client = Client::new();
     let response = client
         .get(&url)
-        .header("User-Agent", "Rust-Reqwest") // GitHub API requires User-Agent
+        .header("User-Agent", "Rust-Reqwest")
         .send()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
